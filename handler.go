@@ -14,6 +14,7 @@ var Handlers = map[string]func([]Value) Value{
 	"HSET":      hset,
 	"HGET":      hget,
 	"HGETALL":   hgetall,
+	// list commands
 	"LPUSH":     lpush,
 	"LPOP":      lpop,
 	"LLEN":      llen,
@@ -21,15 +22,14 @@ var Handlers = map[string]func([]Value) Value{
 	"LRANGE":    lrange,
 	"RPUSH":     rpush,
 	"RPOP":      rpop,
+	// set commands
 	"SADD":      sadd,
 	"SREM":      srem,
 	"SCARD":     scard,
 	"SISMEMBER": sismember,
 }
 
-// we have separate mutexes for the SET MAP AND THE HSET MAP
-// MUTEXES WILL MAKE THE MAP SAFE
-// HSET MAP IS A NESTED HASH MAP
+
 func ping(args []Value) Value {
 	if len(args) == 0 {
 		return Value{typ: "string", str: "PONG"}

@@ -90,6 +90,15 @@ func ds_acquireAllLocks() {
 
 // Set Commands
 
+func ds_strav(list map[string]bool) ([]string){
+	members:=make([]string,0)
+	for member,isFound:=range(list){
+		if isFound{
+			members = append(members, member)
+		}
+	}
+	return members
+}
 func ds_scard(key string) string {
 	SETsMu.Lock()
 	defer SETsMu.Unlock()
@@ -210,6 +219,17 @@ func ds_lrange(key string, index string) (string, bool) {
 	return node.value, true
 }
 
+func ds_ltrav(list *List) []string {
+	values := make([]string, 0)
+	node := *list.head
+	size := list.length
+	for i := 0; i < size; i++ {
+		values = append(values, node.value)
+		node = *node.next
+	}
+	return values
+
+}
 func ds_lindex(key string, index string) (string, bool) {
 	idx, _ := strconv.ParseInt(index, 10, 64)
 	list, ok := LISTS[key]
@@ -329,42 +349,41 @@ func ds_mget(keys []string) []string {
 	return values
 }
 
-func ds_incr(key string) (string) {
+func ds_incr(key string) string {
 	StringSETSMu.Lock()
-    defer StringSETSMu.Unlock()
+	defer StringSETSMu.Unlock()
 
-    val, ok := StringSETS[key]
-    if !ok {
-        return "" 
-    }
+	val, ok := StringSETS[key]
+	if !ok {
+		return ""
+	}
 
-    // Parse existing value
-    value, err := strconv.ParseInt(val, 10, 64)
-    if err != nil {
-        return "" 
-    }
+	// Parse existing value
+	value, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return ""
+	}
 
-    value++
-    StringSETS[key] = strconv.FormatInt(value, 10)
-    return StringSETS[key]
+	value++
+	StringSETS[key] = strconv.FormatInt(value, 10)
+	return StringSETS[key]
 }
 
-
-func ds_incrby(key string,increment int64) (string) {
+func ds_incrby(key string, increment int64) string {
 	StringSETSMu.Lock()
-    defer StringSETSMu.Unlock()
+	defer StringSETSMu.Unlock()
 
-    val, ok := StringSETS[key]
-    if !ok {
-        return "" 
-    }
+	val, ok := StringSETS[key]
+	if !ok {
+		return ""
+	}
 
-    // Parse existing value
-    value, err := strconv.ParseInt(val, 10, 64)
-    if err != nil {
-        return "" 
-    }
-    value+=int64(increment)
-    StringSETS[key] = strconv.FormatInt(value, 10)
-    return StringSETS[key]
+	// Parse existing value
+	value, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return ""
+	}
+	value += int64(increment)
+	StringSETS[key] = strconv.FormatInt(value, 10)
+	return StringSETS[key]
 }

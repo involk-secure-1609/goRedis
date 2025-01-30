@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+var aofSet = map[string]bool{
+	"SET":    true,
+	"INCR":   true,
+	"INCRBY": true,
+	// hash commands
+	"HSET":  true,
+	"LPUSH": true,
+	"LPOP":  true,
+	"RPUSH": true,
+	"RPOP":  true,
+	// set commands
+	"SADD": true,
+	"SREM": true,
+}
+
 type Aof struct {
 	file *os.File
 	rd   *bufio.Reader

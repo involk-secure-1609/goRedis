@@ -3,25 +3,25 @@ package main
 import "strconv"
 
 var Handlers = map[string]func([]Value) Value{
-	"PING":      ping,
+	"PING": ping,
 	// string commads
-	"SET":       set,
-	"GET":       get,
-	"MGET":      mget,
-	"INCR":      incr,
-	"INCRBY":    incrby,
+	"SET":    set,
+	"GET":    get,
+	"MGET":   mget,
+	"INCR":   incr,
+	"INCRBY": incrby,
 	// hash commands
-	"HSET":      hset,
-	"HGET":      hget,
-	"HGETALL":   hgetall,
+	"HSET":    hset,
+	"HGET":    hget,
+	"HGETALL": hgetall,
 	// list commands
-	"LPUSH":     lpush,
-	"LPOP":      lpop,
-	"LLEN":      llen,
-	"LINDEX":    lindex,
-	"LRANGE":    lrange,
-	"RPUSH":     rpush,
-	"RPOP":      rpop,
+	"LPUSH":  lpush,
+	"LPOP":   lpop,
+	"LLEN":   llen,
+	"LINDEX": lindex,
+	"LRANGE": lrange,
+	"RPUSH":  rpush,
+	"RPOP":   rpop,
 	// set commands
 	"SADD":      sadd,
 	"SREM":      srem,
@@ -29,8 +29,7 @@ var Handlers = map[string]func([]Value) Value{
 	"SISMEMBER": sismember,
 }
 
-
-func ping(args []Value) Value {
+func ping(args []Value) Value { // works
 	if len(args) == 0 {
 		return Value{typ: "string", str: "PONG"}
 	}
@@ -38,9 +37,10 @@ func ping(args []Value) Value {
 	return Value{typ: "string", str: args[0].bulk}
 }
 
-func srem(args []Value) Value {
+// SET commands
+func srem(args []Value) Value { // works
 	if len(args) < 2 {
-		return Value{typ: "string", str: "ERR wrong number of arguments for 'srem' command"}
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'srem' command"}
 	}
 	key := args[0].bulk
 	members := make([]string, 0)
@@ -50,9 +50,9 @@ func srem(args []Value) Value {
 	elementsRemoved := ds_srem(key, members)
 	return Value{typ: "string", str: elementsRemoved}
 }
-func sadd(args []Value) Value {
+func sadd(args []Value) Value { // works
 	if len(args) < 2 {
-		return Value{typ: "string", str: "ERR wrong number of arguments for 'sadd' command"}
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'sadd' command"}
 	}
 	key := args[0].bulk
 	members := make([]string, 0)
@@ -62,18 +62,18 @@ func sadd(args []Value) Value {
 	elementsAdded := ds_sadd(key, members)
 	return Value{typ: "string", str: elementsAdded}
 }
-func scard(args []Value) Value {
+func scard(args []Value) Value { // works
 	if len(args) != 1 {
-		return Value{typ: "string", str: "ERR wrong number of arguments for 'scard' command"}
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'scard' command"}
 	}
 	key := args[0].bulk
 
 	cardinality := ds_scard(key)
 	return Value{typ: "string", str: cardinality}
 }
-func sismember(args []Value) Value {
+func sismember(args []Value) Value { // works
 	if len(args) != 2 {
-		return Value{typ: "string", str: "ERR wrong number of arguments for 'sismember' command"}
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'sismember' command"}
 	}
 	key := args[0].bulk
 	member := args[1].bulk
@@ -93,7 +93,7 @@ func lrange(args []Value) Value {
 	return Value{typ: "string", str: "value"}
 }
 
-func lindex(args []Value) Value {
+func lindex(args []Value) Value { // works
 	if len(args) != 2 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'lindex' command"}
 	}
@@ -103,9 +103,9 @@ func lindex(args []Value) Value {
 	if !ok {
 		return Value{typ: "null"}
 	}
-	return Value{typ: "string", str: value}
+	return Value{typ: "bulk", bulk: value}
 }
-func llen(args []Value) Value {
+func llen(args []Value) Value { //works
 	if len(args) != 1 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'lpop' command"}
 	}
@@ -114,7 +114,7 @@ func llen(args []Value) Value {
 
 	return Value{typ: "string", str: value}
 }
-func rpop(args []Value) Value {
+func rpop(args []Value) Value { // works
 	if len(args) != 1 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'lpop' command"}
 	}
@@ -123,10 +123,10 @@ func rpop(args []Value) Value {
 	if !ok {
 		return Value{typ: "null"}
 	}
-	return Value{typ: "string", str: value}
+	return Value{typ: "bulk", bulk: value}
 }
 
-func rpush(args []Value) Value {
+func rpush(args []Value) Value { // works
 	if len(args) < 2 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'lpush' command"}
 	}
@@ -138,7 +138,7 @@ func rpush(args []Value) Value {
 	length := ds_rpush(key, values)
 	return Value{typ: "string", str: length}
 }
-func lpop(args []Value) Value {
+func lpop(args []Value) Value { // works
 	if len(args) != 1 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'lpop' command"}
 	}
@@ -149,7 +149,7 @@ func lpop(args []Value) Value {
 	}
 	return Value{typ: "string", str: value}
 }
-func lpush(args []Value) Value {
+func lpush(args []Value) Value { // works
 	if len(args) < 2 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'lpush' command"}
 	}
@@ -163,13 +163,13 @@ func lpush(args []Value) Value {
 }
 
 func mget(args []Value) Value {
-	if len(args)==0 {
+	if len(args) == 0 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'mget' command"}
 	}
 
-	keys := make([]string,0)
-	for i:=0;i<len(args);i++{
-		keys=append(keys, args[i].bulk)
+	keys := make([]string, 0)
+	for i := 0; i < len(args); i++ {
+		keys = append(keys, args[i].bulk)
 	}
 	value := ds_mget(keys)
 	values := []Value{}
@@ -178,22 +178,22 @@ func mget(args []Value) Value {
 	}
 	return Value{typ: "array", array: values}
 }
-func incrby(args []Value) Value {
-	if len(args) != 1 {
-		return Value{typ: "error", str: "ERR wrong number of arguments for 'incr' command"}
+func incrby(args []Value) Value { // works
+	if len(args) != 2 {
+		return Value{typ: "error", str: "ERR wrong number of arguments for 'incrby' command"}
 	}
 
 	key := args[0].bulk
-	increment:=args[1].bulk
-	incr,err:=strconv.ParseInt(increment,10,64)
-	if err!=nil{
+	increment := args[1].bulk
+	incr, err := strconv.ParseInt(increment, 10, 64)
+	if err != nil {
 		return Value{typ: "error", str: "ERR wrong value of increment provided"}
 	}
-	value := ds_incrby(key,incr)
+	value := ds_incrby(key, incr)
 
 	return Value{typ: "string", str: value}
 }
-func incr(args []Value) Value {
+func incr(args []Value) Value { // works
 	if len(args) != 1 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'incr' command"}
 	}
@@ -204,7 +204,8 @@ func incr(args []Value) Value {
 
 	return Value{typ: "string", str: value}
 }
-func set(args []Value) Value {
+
+func set(args []Value) Value { //works
 	if len(args) != 2 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'set' command"}
 	}
@@ -217,7 +218,7 @@ func set(args []Value) Value {
 	return Value{typ: "string", str: "OK"}
 }
 
-func get(args []Value) Value {
+func get(args []Value) Value { //works
 	if len(args) != 1 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'get' command"}
 	}
@@ -233,7 +234,7 @@ func get(args []Value) Value {
 	return Value{typ: "bulk", bulk: value}
 }
 
-func hset(args []Value) Value {
+func hset(args []Value) Value { // works
 	if len(args) != 3 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'hset' command"}
 	}
@@ -246,7 +247,7 @@ func hset(args []Value) Value {
 	return Value{typ: "string", str: "OK"}
 }
 
-func hget(args []Value) Value {
+func hget(args []Value) Value { // works
 	if len(args) != 2 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'hget' command"}
 	}
@@ -263,7 +264,7 @@ func hget(args []Value) Value {
 	return Value{typ: "bulk", bulk: value}
 }
 
-func hgetall(args []Value) Value {
+func hgetall(args []Value) Value { // works
 	if len(args) != 1 {
 		return Value{typ: "error", str: "ERR wrong number of arguments for 'hgetall' command"}
 	}

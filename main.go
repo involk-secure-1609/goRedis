@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"log"
+
+	// "log"
 	"net"
 	"strings"
 )
@@ -15,7 +18,17 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-
+	// rdb, err := NewRbd("database.rdb")
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return
+	// }
+	// err = rdb.load()
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return
+	// }
+	// defer rdb.Close()
 	aof, err := NewAof("database.aof")
 	if err != nil {
 		fmt.Println(err)
@@ -65,20 +78,25 @@ func main() {
 
 		command := strings.ToUpper(value.array[0].bulk)
 		args := value.array[1:]
-
+		log.Println(command)
+		log.Println(args)
 		writer := NewWriter(conn)
 
 		handler, ok := Handlers[command]
 		if !ok {
 			fmt.Println("Invalid command: ", command)
-			writer.Write(Value{typ: "string", str: ""})
+			writer.Write(Value{typ: "error", str: fmt.Sprint("Invalid command: ", command)})
 			continue
 		}
 
-		if command == "SET" || command == "HSET" {
-			aof.Write(value)
+		// if the command belongs to the aofSet which contains the set of commands to be written to
+		// the aof then log it
+		aofCommand, ok := aofSet[command]
+		if ok {
+			if aofCommand {
+				aof.Write(value)
+			}
 		}
-
 		result := handler(args)
 		writer.Write(result)
 	}

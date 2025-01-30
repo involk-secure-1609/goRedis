@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"strconv"
 	"sync"
 )
@@ -75,23 +76,23 @@ LRANGE extracts a range of elements from a list.
 var LISTS = map[string]*List{}
 var LISTSMu = sync.RWMutex{}
 
-/*
-General command to acquire and release locks over all the datastructures used
-ds_acquireAllLocks is to be called before we write to the rdb
-and ds_releaseAllLocks is to be called after we write to the rdb
-*/
-func ds_releaseAllLocks() {
-	StringSETSMu.Unlock()
-	HSETsMu.Unlock()
-	SETsMu.Unlock()
-	LISTSMu.Unlock()
-}
-func ds_acquireAllLocks() {
-	StringSETSMu.Lock()
-	HSETsMu.Lock()
-	SETsMu.Lock()
-	LISTSMu.Lock()
-}
+// /*
+// General command to acquire and release locks over all the datastructures used
+// ds_acquireAllLocks is to be called before we write to the rdb
+// and ds_releaseAllLocks is to be called after we write to the rdb
+// */
+// func ds_releaseAllLocks() {
+// 	StringSETSMu.Unlock()
+// 	HSETsMu.Unlock()
+// 	SETsMu.Unlock()
+// 	LISTSMu.Unlock()
+// }
+// func ds_acquireAllLocks() {
+// 	StringSETSMu.Lock()
+// 	HSETsMu.Lock()
+// 	SETsMu.Lock()
+// 	LISTSMu.Lock()
+// }
 
 // Set Commands
 
@@ -169,17 +170,44 @@ func ds_sadd(key string, members []string) string {
 }
 
 // List Commands
-func ds_rpush(key string, values []string) string {
+
+func ds_lpush(key string, values []string) string { // works
 	LISTSMu.Lock()
 	defer LISTSMu.Unlock()
 	list, ok := LISTS[key]
 	if !ok {
 		list = &List{head: nil, tail: nil, length: 0}
+		LISTS[key] = list
+	}
+	for _, value := range values {
+		node := &Node{value: value, prev: nil}
+		if list.length == 0 {
+			node.next = nil
+			list.head = node
+			list.tail = node
+		} else {
+			list.head.prev = node
+			node.next = list.head
+			list.head = node
+		}
+		list.length++
+	}
+	length := strconv.FormatInt(int64(list.length), 10)
+	return length
+}
+
+func ds_rpush(key string, values []string) string { // works
+	LISTSMu.Lock()
+	defer LISTSMu.Unlock()
+	list, ok := LISTS[key]
+	if !ok {
+		list = &List{head: nil, tail: nil, length: 0}
+		LISTS[key] = list
 	}
 	for _, value := range values {
 		node := &Node{value: value, next: nil}
 		if list.length == 0 {
-			node.next = nil
+			node.prev = nil
 			list.head = node
 			list.tail = node
 		} else {
@@ -192,7 +220,27 @@ func ds_rpush(key string, values []string) string {
 	length := strconv.FormatInt(int64(list.length), 10)
 	return length
 }
-func ds_rpop(key string) (string, bool) {
+
+func ds_lpop(key string) (string, bool) { // works
+	LISTSMu.Lock()
+	defer LISTSMu.Unlock()
+	log.Println(key)
+	list, ok := LISTS[key]
+	if !ok {
+		log.Println("this list is not present")
+		return "", false
+	}
+	head := list.head
+	value := head.value
+	next := head.next
+	list.head = next
+	list.length--
+	if list.length == 0 {
+		delete(LISTS, key)
+	}
+	return value, true
+}
+func ds_rpop(key string) (string, bool) { //works
 	LISTSMu.Lock()
 	defer LISTSMu.Unlock()
 	list, ok := LISTS[key]
@@ -202,7 +250,6 @@ func ds_rpop(key string) (string, bool) {
 	tail := list.tail
 	value := tail.value
 	prev := tail.prev
-	prev.next = nil
 	list.tail = prev
 	list.length--
 	if list.length == 0 {
@@ -241,6 +288,9 @@ func ds_lindex(key string, index string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	if(idx>=int64(list.length)){
+		return "",false
+	}
 	node := *list.head
 	for i := 0; i < int(idx); i++ {
 		node = *node.next
@@ -253,46 +303,6 @@ func ds_llen(key string) string {
 	list, ok := LISTS[key]
 	if !ok {
 		return "0"
-	}
-	length := strconv.FormatInt(int64(list.length), 10)
-	return length
-}
-func ds_lpop(key string) (string, bool) {
-	LISTSMu.Lock()
-	defer LISTSMu.Unlock()
-	list, ok := LISTS[key]
-	if !ok {
-		return "", false
-	}
-	head := list.head
-	value := head.value
-	next := head.next
-	list.head = next
-	list.length--
-	if list.length == 0 {
-		delete(LISTS, key)
-	}
-	return value, true
-}
-func ds_lpush(key string, values []string) string {
-	LISTSMu.Lock()
-	defer LISTSMu.Unlock()
-	list, ok := LISTS[key]
-	if !ok {
-		list = &List{head: nil, tail: nil, length: 0}
-	}
-	for _, value := range values {
-		node := &Node{value: value, prev: nil}
-		if list.length == 0 {
-			node.next = nil
-			list.head = node
-			list.tail = node
-		} else {
-			node.next = list.head
-			list.head.prev = node
-			list.head = node
-		}
-		list.length++
 	}
 	length := strconv.FormatInt(int64(list.length), 10)
 	return length

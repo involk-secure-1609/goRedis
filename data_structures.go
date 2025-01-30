@@ -23,6 +23,11 @@ type Node struct {
 	prev  *Node
 }
 
+type HashElement struct {
+	key   string
+	value string
+}
+
 // Map for storing hashes
 // In redis HashMaps are used for storing Hashes
 /*
@@ -90,10 +95,10 @@ func ds_acquireAllLocks() {
 
 // Set Commands
 
-func ds_strav(list map[string]bool) ([]string){
-	members:=make([]string,0)
-	for member,isFound:=range(list){
-		if isFound{
+func ds_strav(set map[string]bool) []string {
+	members := make([]string, 0)
+	for member, isFound := range set {
+		if isFound {
 			members = append(members, member)
 		}
 	}
@@ -316,6 +321,14 @@ func ds_hset(hash string, key string, value string) {
 		HSETs[hash] = map[string]string{}
 	}
 	HSETs[hash][key] = value
+}
+
+func ds_htrav(hash map[string]string) []HashElement {
+	hashElements := make([]HashElement, 0)
+	for key, value := range hash {
+		hashElements = append(hashElements, HashElement{key: key, value: value})
+	}
+	return hashElements
 }
 
 // String Commands

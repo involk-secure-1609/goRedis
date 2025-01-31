@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -51,7 +51,7 @@ func NewRbd(path string) (*Rdb, error) {
 	// start go routine to overwrite the rdb and save to disk every 60 seconds
 	go func() {
 		for {
-			time.Sleep(60 * time.Second)
+			time.Sleep(20 * time.Second)
 			log.Println("starting to write rdb")
 			err := rdb.write()
 			if err != nil {
@@ -208,7 +208,7 @@ func (rdb *Rdb) load() error {
 }
 
 func readRdbDatabase(curr *os.File, offset *int) (rdbEof bool, newDb bool, err error) {
-	databaseNumber, n, _, err, _ := readRdbLength(curr, *offset)
+	databaseNumber, n, _, err, _, _ := readRdbLength(curr, *offset)
 	log.Println(databaseNumber)
 	if err != nil {
 		return false, false, err
@@ -216,7 +216,7 @@ func readRdbDatabase(curr *os.File, offset *int) (rdbEof bool, newDb bool, err e
 	*offset += n
 	log.Println("Offset: ", offset)
 	for {
-		valueEncoding, n, end, err, newDbFlag := readRdbLength(curr, *offset)
+		valueEncoding, n, end, err, newDbFlag, _ := readRdbLength(curr, *offset)
 		log.Println(valueEncoding, n, end, err)
 		if err != nil {
 			if err == io.EOF {
@@ -322,7 +322,7 @@ func writeStrings(temp *os.File, offset *int) error {
 			*offset += n
 			keyBytes := serializeString(key)
 			log.Println(keyBytes, len(keyBytes))
-			valueBytes := serializeString(value)
+			valueBytes := serializeValue(value)
 			log.Println(valueBytes, len(valueBytes))
 			stringBytes := make([]byte, 0)
 			// Concatenate the key and value serialization
@@ -508,78 +508,12 @@ func renameRbd() error {
 	return nil
 }
 
-func readRdbByte(file *os.File, offset *int) (byte, error) {
-	byteRead := make([]byte, 1)
-	n, err := file.ReadAt(byteRead, int64(*offset))
-	log.Println(n, byteRead, byteRead[0])
-	*offset += n
-	if err != nil {
-		return byteRead[0], err
-	}
-	return byteRead[0], nil
-}
-
-func readRdbLength(file *os.File, offset int) (result int, bytesRead int, eof bool, Err error, newDatabase bool) {
-	// Read one byte from the stream
-	byteRead := make([]byte, 1)
-	_, err := file.ReadAt(byteRead, int64(offset))
-	if err != nil {
-		log.Println("Error reading file:", err)
-		return -1, -1, false, err, false
-	}
-	if byteRead[0] == RDB_EOF {
-		return -1, -1, true, nil, false
-	}
-	if byteRead[0] == SELECT_DB {
-		return -1, -1, false, nil, true
-	}
-	// Extract the two most significant bits
-	msb := (byteRead[0] >> 6) & 0b11 // Shift right by 6 and mask to get the 2 MSBs
-
-	// Determine how to parse the length based on the MSBs
-	switch msb {
-	case 0b00: // 00: The next 6 bits represent the length
-		length := int(byteRead[0] & 0b00111111) // Mask to get the last 6 bits
-		return length, 1, false, nil, false
-
-	case 0b01: // 01: Read one additional byte. The combined 14 bits represent the length
-		nextByte := make([]byte, 1)
-		_, err := file.ReadAt(nextByte, int64(offset)+1)
-		if err != nil {
-			log.Println("Error reading additional byte:", err)
-			return -1, -1, false, nil, false
-		}
-		// Combine the last 6 bits of the first byte and all 8 bits of the second byte
-		length := int(byteRead[0]&0b00111111)<<8 | int(nextByte[0])
-		return length, 2, false, nil, false
-
-	case 0b10: // 10: Discard the remaining 6 bits. The next 4 bytes represent the length
-		lengthBytes := make([]byte, 4)
-		_, err := file.ReadAt(lengthBytes, int64(offset)+1)
-		if err != nil {
-			log.Println("Error reading 4 bytes for length:", err)
-			return -1, -1, false, nil, false
-		}
-		// Convert the 4 bytes to a 32-bit integer (big-endian)
-		length := int(binary.BigEndian.Uint32(lengthBytes))
-		return length, 5, false, nil, false
-
-	case 0b11: // 11: Reserved or special case (not specified in your description)
-		log.Println("Special case (11) not implemented")
-		return -1, -1, false, nil, false
-
-	default:
-		log.Println("Invalid MSB value")
-		return -1, -1, false, nil, false
-	}
-}
-
 func readRdbSet(file *os.File, offset *int) error {
 	SETsMu.Lock()
 	defer SETsMu.Unlock()
 
 	// Read key size
-	keySize, n, _, err, _ := readRdbLength(file, *offset)
+	keySize, n, _, err, _, _ := readRdbLength(file, *offset)
 	log.Println(keySize, n, err)
 	if err != nil {
 		return err
@@ -596,7 +530,7 @@ func readRdbSet(file *os.File, offset *int) error {
 	*offset += n
 
 	// Read set size
-	setSize, n, _, err, _ := readRdbLength(file, *offset)
+	setSize, n, _, err, _, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -609,7 +543,7 @@ func readRdbSet(file *os.File, offset *int) error {
 
 	// Read each value in the set
 	for i := 0; i < setSize; i++ {
-		valueSize, n, _, err, _ := readRdbLength(file, *offset)
+		valueSize, n, _, err, _, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -631,7 +565,7 @@ func readRdbSet(file *os.File, offset *int) error {
 func readRdbHash(file *os.File, offset *int) error {
 	HSETsMu.Lock()
 	defer HSETsMu.Unlock()
-	hashNameSize, n, _, err, _ := readRdbLength(file, *offset)
+	hashNameSize, n, _, err, _, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -647,13 +581,13 @@ func readRdbHash(file *os.File, offset *int) error {
 	}
 
 	*offset += n
-	hashSize, n, _, err, _ := readRdbLength(file, *offset)
+	hashSize, n, _, err, _, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
 	*offset += n
 	for i := 0; i < hashSize; i++ {
-		keySize, n, _, err, _ := readRdbLength(file, *offset)
+		keySize, n, _, err, _, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -664,7 +598,7 @@ func readRdbHash(file *os.File, offset *int) error {
 			return err
 		}
 		*offset += n
-		valueSize, n, _, err, _ := readRdbLength(file, *offset)
+		valueSize, n, _, err, _, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -683,7 +617,7 @@ func readRdbHash(file *os.File, offset *int) error {
 func readRdbList(file *os.File, offset *int) error {
 	// LISTSMu.Lock()
 	// defer LISTSMu.Unlock()
-	keySize, n, _, err, _ := readRdbLength(file, *offset)
+	keySize, n, _, err, _, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -694,14 +628,14 @@ func readRdbList(file *os.File, offset *int) error {
 		return err
 	}
 	*offset += n
-	setSize, n, _, err, _ := readRdbLength(file, *offset)
+	setSize, n, _, err, _, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
 	*offset += n
 	values := make([]string, 0)
 	for i := 0; i < setSize; i++ {
-		valueSize, n, _, err, _ := readRdbLength(file, *offset)
+		valueSize, n, _, err, _, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -734,9 +668,32 @@ func readConstants(file *os.File, offset *int) error {
 	*offset += n
 	return nil
 }
+
+func deserializeValue(file *os.File, offset *int) (string, error) {
+	valueSize, n, _, err, _, isActualInt := readRdbLength(file, *offset)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+	log.Println(valueSize, n, err)
+	log.Println("finished reading value length", valueSize)
+	*offset += n
+	if isActualInt {
+		return strconv.FormatInt(int64(valueSize), 10), nil
+	}
+	value := make([]byte, valueSize)
+	n, err = file.ReadAt(value, int64(*offset))
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+	log.Println("finished reading value", value, string(value))
+	*offset += n
+	return string(value), nil
+}
 func readRdbStringSet(file *os.File, offset *int) error {
 	log.Println("Offset: ", offset)
-	keySize, n, _, err, _ := readRdbLength(file, *offset)
+	keySize, n, _, err, _, _ := readRdbLength(file, *offset)
 	log.Println(keySize, n, err)
 	if err != nil {
 		return err
@@ -751,22 +708,11 @@ func readRdbStringSet(file *os.File, offset *int) error {
 	}
 	log.Println(n, err, len(key), string(key))
 	*offset += n
-	valueSize, n, _, err, _ := readRdbLength(file, *offset)
+	value, err := deserializeValue(file, offset)
 	if err != nil {
-		log.Println(err)
-		return err
+		log.Println("error while deserializing value", err)
+		// return err
 	}
-	log.Println(valueSize, n, err)
-	log.Println("finished reading value length", valueSize)
-	*offset += n
-	value := make([]byte, valueSize)
-	n, err = file.ReadAt(value, int64(*offset))
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-	log.Println("finished reading value", value, string(value))
-	*offset += n
-	ds_set(string(key), string(value))
+	ds_set(string(key), value)
 	return nil
 }

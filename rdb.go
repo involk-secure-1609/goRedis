@@ -51,7 +51,7 @@ func NewRbd(path string) (*Rdb, error) {
 	// start go routine to overwrite the rdb and save to disk every 60 seconds
 	go func() {
 		for {
-			time.Sleep(10 * time.Second)
+			time.Sleep(60 * time.Second)
 			log.Println("starting to write rdb")
 			err := rdb.write()
 			if err != nil {
@@ -78,7 +78,7 @@ func (rdb *Rdb) write() error {
 	defer rdb.mu.Unlock()
 	// we open the file
 	log.Println("trying to open file")
-	temp, err := os.OpenFile("database.rdb", os.O_CREATE|os.O_RDWR, 0666)
+	temp, err := os.OpenFile("database_temp.rdb", os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
 		log.Println(err)
 		return err
@@ -136,13 +136,13 @@ func (rdb *Rdb) write() error {
 		log.Println(err)
 		return err
 	}
-	// // we atomically rename the database_temp.rdb to database.rbd
-	// err = renameRbd()
-	// if err != nil {
-	// 	log.Println(err)
-	// 	return err
-	// }
-	// log.Println("finished renaming")
+	// we atomically rename the database_temp.rdb to database.rbd
+	err = renameRbd()
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	log.Println("finished renaming")
 	return nil
 }
 
@@ -175,68 +175,93 @@ func (rdb *Rdb) load() error {
 		return err
 	}
 	log.Println("read all the constants...")
-	// for {
-	byteRead, err := readRdbByte(curr, &offset)
-	if err != nil {
-		return err
+	byteAlreadyRead := false
+	var byteRead byte
+	for {
+		if !byteAlreadyRead {
+			byteRead, err = readRdbByte(curr, &offset)
+			if err != nil {
+				return err
+			}
+		}
+		byteAlreadyRead = false
+		if byteRead == RDB_EOF {
+			log.Println("Reached end of Rdb file")
+			return nil
+		}
+		if byteRead == SELECT_DB {
+			log.Println("read SELECT_DB FLAG of a new Database")
+			rbdEof, newDbFlag, err := readRdbDatabase(curr, &offset)
+			if err != nil {
+				return err
+			}
+			if rbdEof {
+				byteRead = RDB_EOF
+				byteAlreadyRead = true
+			}
+			if newDbFlag {
+				byteRead = SELECT_DB
+				byteAlreadyRead = true
+			}
+		}
 	}
-	if byteRead == SELECT_DB {
-		log.Println("read SELECT_DB FLAG")
-	}
-	// }
-	log.Println("Offset: ", offset)
-	databaseNumber, n, _, err := readRdbLength(curr, offset)
+}
+
+func readRdbDatabase(curr *os.File, offset *int) (rdbEof bool, newDb bool, err error) {
+	databaseNumber, n, _, err, _ := readRdbLength(curr, *offset)
 	log.Println(databaseNumber)
 	if err != nil {
-		return err
+		return false, false, err
 	}
-	offset += n
+	*offset += n
 	log.Println("Offset: ", offset)
 	for {
-		valueEncoding, n, end, err := readRdbLength(curr, offset)
+		valueEncoding, n, end, err, newDbFlag := readRdbLength(curr, *offset)
 		log.Println(valueEncoding, n, end, err)
 		if err != nil {
 			if err == io.EOF {
-				return nil
+				return true, false, nil
 			}
-			return err
+			return false, false, err
+		}
+		if newDbFlag {
+			return false, true, nil
 		}
 		if end {
 			log.Println("read the RDB EOF")
-			return nil
+			return true, false, nil
 		}
-		offset += n
+		*offset += n
 		log.Println("Offset: ", offset)
 		if valueEncoding == SetValueEncoding {
 			log.Println("read value encoding of Set", valueEncoding)
-			err = readRdbSet(curr, &offset)
+			err = readRdbSet(curr, offset)
 			if err != nil {
-				return err
+				return false, false, err
 			}
 		} else if valueEncoding == HashValueEncoding {
 			log.Println("read value encoding of Hash", valueEncoding)
-			err = readRdbHash(curr, &offset)
+			err = readRdbHash(curr, offset)
 			if err != nil {
-				return err
+				return false, false, err
 			}
 		} else if valueEncoding == ListValueEncoding {
 			log.Println("read value encoding of List", valueEncoding)
-			err = readRdbList(curr, &offset)
+			err = readRdbList(curr, offset)
 			if err != nil {
-				return err
+				return false, false, err
 			}
 		} else if valueEncoding == StringValueEncoding {
 			log.Println("read value encoding of String", valueEncoding)
-			err = readRdbStringSet(curr, &offset)
+			err = readRdbStringSet(curr, offset)
 			if err != nil {
 				log.Println("finished reading stringSet with", err)
-				return err
+				return false, false, err
 			}
 		}
 
 	}
 }
-
 func writeConstants(temp *os.File, offset *int) error {
 	// writes the MAGIC FLAG
 	constantBytes := make([]byte, 0)
@@ -494,16 +519,19 @@ func readRdbByte(file *os.File, offset *int) (byte, error) {
 	return byteRead[0], nil
 }
 
-func readRdbLength(file *os.File, offset int) (result int, bytesRead int, eof bool, Err error) {
+func readRdbLength(file *os.File, offset int) (result int, bytesRead int, eof bool, Err error, newDatabase bool) {
 	// Read one byte from the stream
 	byteRead := make([]byte, 1)
 	_, err := file.ReadAt(byteRead, int64(offset))
 	if err != nil {
 		log.Println("Error reading file:", err)
-		return -1, -1, false, err
+		return -1, -1, false, err, false
 	}
 	if byteRead[0] == RDB_EOF {
-		return -1, -1, true, nil
+		return -1, -1, true, nil, false
+	}
+	if byteRead[0] == SELECT_DB {
+		return -1, -1, false, nil, true
 	}
 	// Extract the two most significant bits
 	msb := (byteRead[0] >> 6) & 0b11 // Shift right by 6 and mask to get the 2 MSBs
@@ -512,37 +540,37 @@ func readRdbLength(file *os.File, offset int) (result int, bytesRead int, eof bo
 	switch msb {
 	case 0b00: // 00: The next 6 bits represent the length
 		length := int(byteRead[0] & 0b00111111) // Mask to get the last 6 bits
-		return length, 1, false, nil
+		return length, 1, false, nil, false
 
 	case 0b01: // 01: Read one additional byte. The combined 14 bits represent the length
 		nextByte := make([]byte, 1)
 		_, err := file.ReadAt(nextByte, int64(offset)+1)
 		if err != nil {
 			log.Println("Error reading additional byte:", err)
-			return -1, -1, false, nil
+			return -1, -1, false, nil, false
 		}
 		// Combine the last 6 bits of the first byte and all 8 bits of the second byte
 		length := int(byteRead[0]&0b00111111)<<8 | int(nextByte[0])
-		return length, 2, false, nil
+		return length, 2, false, nil, false
 
 	case 0b10: // 10: Discard the remaining 6 bits. The next 4 bytes represent the length
 		lengthBytes := make([]byte, 4)
 		_, err := file.ReadAt(lengthBytes, int64(offset)+1)
 		if err != nil {
 			log.Println("Error reading 4 bytes for length:", err)
-			return -1, -1, false, nil
+			return -1, -1, false, nil, false
 		}
 		// Convert the 4 bytes to a 32-bit integer (big-endian)
 		length := int(binary.BigEndian.Uint32(lengthBytes))
-		return length, 5, false, nil
+		return length, 5, false, nil, false
 
 	case 0b11: // 11: Reserved or special case (not specified in your description)
 		log.Println("Special case (11) not implemented")
-		return -1, -1, false, nil
+		return -1, -1, false, nil, false
 
 	default:
 		log.Println("Invalid MSB value")
-		return -1, -1, false, nil
+		return -1, -1, false, nil, false
 	}
 }
 
@@ -551,7 +579,7 @@ func readRdbSet(file *os.File, offset *int) error {
 	defer SETsMu.Unlock()
 
 	// Read key size
-	keySize, n, _, err := readRdbLength(file, *offset)
+	keySize, n, _, err, _ := readRdbLength(file, *offset)
 	log.Println(keySize, n, err)
 	if err != nil {
 		return err
@@ -568,7 +596,7 @@ func readRdbSet(file *os.File, offset *int) error {
 	*offset += n
 
 	// Read set size
-	setSize, n, _, err := readRdbLength(file, *offset)
+	setSize, n, _, err, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -581,7 +609,7 @@ func readRdbSet(file *os.File, offset *int) error {
 
 	// Read each value in the set
 	for i := 0; i < setSize; i++ {
-		valueSize, n, _, err := readRdbLength(file, *offset)
+		valueSize, n, _, err, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -603,7 +631,7 @@ func readRdbSet(file *os.File, offset *int) error {
 func readRdbHash(file *os.File, offset *int) error {
 	HSETsMu.Lock()
 	defer HSETsMu.Unlock()
-	hashNameSize, n, _, err := readRdbLength(file, *offset)
+	hashNameSize, n, _, err, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -619,13 +647,13 @@ func readRdbHash(file *os.File, offset *int) error {
 	}
 
 	*offset += n
-	hashSize, n, _, err := readRdbLength(file, *offset)
+	hashSize, n, _, err, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
 	*offset += n
 	for i := 0; i < hashSize; i++ {
-		keySize, n, _, err := readRdbLength(file, *offset)
+		keySize, n, _, err, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -636,7 +664,7 @@ func readRdbHash(file *os.File, offset *int) error {
 			return err
 		}
 		*offset += n
-		valueSize, n, _, err := readRdbLength(file, *offset)
+		valueSize, n, _, err, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -655,7 +683,7 @@ func readRdbHash(file *os.File, offset *int) error {
 func readRdbList(file *os.File, offset *int) error {
 	// LISTSMu.Lock()
 	// defer LISTSMu.Unlock()
-	keySize, n, _, err := readRdbLength(file, *offset)
+	keySize, n, _, err, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -666,14 +694,14 @@ func readRdbList(file *os.File, offset *int) error {
 		return err
 	}
 	*offset += n
-	setSize, n, _, err := readRdbLength(file, *offset)
+	setSize, n, _, err, _ := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
 	*offset += n
 	values := make([]string, 0)
 	for i := 0; i < setSize; i++ {
-		valueSize, n, _, err := readRdbLength(file, *offset)
+		valueSize, n, _, err, _ := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -708,7 +736,7 @@ func readConstants(file *os.File, offset *int) error {
 }
 func readRdbStringSet(file *os.File, offset *int) error {
 	log.Println("Offset: ", offset)
-	keySize, n, _, err := readRdbLength(file, *offset)
+	keySize, n, _, err, _ := readRdbLength(file, *offset)
 	log.Println(keySize, n, err)
 	if err != nil {
 		return err
@@ -723,7 +751,7 @@ func readRdbStringSet(file *os.File, offset *int) error {
 	}
 	log.Println(n, err, len(key), string(key))
 	*offset += n
-	valueSize, n, _, err := readRdbLength(file, *offset)
+	valueSize, n, _, err, _ := readRdbLength(file, *offset)
 	if err != nil {
 		log.Println(err)
 		return err

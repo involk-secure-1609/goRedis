@@ -18,36 +18,32 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	// rdb, err := NewRbd("database.rdb")
-	// if err != nil {
-	// 	log.Println(err)
-	// 	return
-	// }
-	// err = rdb.load()
-	// if err != nil {
-	// 	log.Println(err)
-	// 	return
-	// }
-	// defer rdb.Close()
-	aof, err := NewAof("database.aof")
+	rdb, err := NewRbd("database.rdb")
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
-	defer aof.Close()
+	defer rdb.Close()
 
-	aof.Read(func(value Value) {
-		command := strings.ToUpper(value.array[0].bulk)
-		args := value.array[1:]
+	// aof, err := NewAof("database.aof")
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// defer aof.Close()
 
-		handler, ok := Handlers[command]
-		if !ok {
-			fmt.Println("Invalid command: ", command)
-			return
-		}
+	// aof.Read(func(value Value) {
+	// 	command := strings.ToUpper(value.array[0].bulk)
+	// 	args := value.array[1:]
 
-		handler(args)
-	})
+	// 	handler, ok := Handlers[command]
+	// 	if !ok {
+	// 		fmt.Println("Invalid command: ", command)
+	// 		return
+	// 	}
+
+	// 	handler(args)
+	// })
 
 	// Listen for connections
 	conn, err := l.Accept()
@@ -91,12 +87,12 @@ func main() {
 
 		// if the command belongs to the aofSet which contains the set of commands to be written to
 		// the aof then log it
-		aofCommand, ok := aofSet[command]
-		if ok {
-			if aofCommand {
-				aof.Write(value)
-			}
-		}
+		// aofCommand, ok := aofSet[command]
+		// if ok {
+		// 	if aofCommand {
+		// 		aof.Write(value)
+		// 	}
+		// }
 		result := handler(args)
 		writer.Write(result)
 	}

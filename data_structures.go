@@ -277,6 +277,9 @@ func ds_ltrav(list *List) []string {
 	size := list.length
 	for i := 0; i < size; i++ {
 		values = append(values, node.value)
+		if node.next == nil {
+			break
+		}
 		node = *node.next
 	}
 	return values
@@ -288,8 +291,8 @@ func ds_lindex(key string, index string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if(idx>=int64(list.length)){
-		return "",false
+	if idx >= int64(list.length) {
+		return "", false
 	}
 	node := *list.head
 	for i := 0; i < int(idx); i++ {

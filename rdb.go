@@ -40,24 +40,29 @@ func NewRbd(path string) (*Rdb, error) {
 		panic(err)
 	}
 
-	rbd := &Rdb{
+	rdb := &Rdb{
 		file: f,
 	}
-
+	err = rdb.load()
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
 	// start go routine to overwrite the rdb and save to disk every 60 seconds
 	go func() {
 		for {
-			rbd.mu.Lock()
-			err := rbd.write()
+			time.Sleep(10 * time.Second)
+			log.Println("starting to write rdb")
+			err := rdb.write()
 			if err != nil {
+				log.Println(err)
 				panic(err)
 			}
-			rbd.mu.Unlock()
-			time.Sleep(time.Minute)
+			log.Println("finished writing rdb")
 		}
 	}()
 
-	return rbd, nil
+	return rdb, nil
 }
 
 func (rdb *Rdb) Close() error {
@@ -68,57 +73,76 @@ func (rdb *Rdb) Close() error {
 }
 
 func (rdb *Rdb) write() error {
+	log.Println("entering into the RdbWrite function")
 	rdb.mu.Lock()
 	defer rdb.mu.Unlock()
 	// we open the file
-	temp, err := os.OpenFile("database_temp.rdb", os.O_CREATE|os.O_RDWR, 0666)
+	log.Println("trying to open file")
+	temp, err := os.OpenFile("database.rdb", os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
+		log.Println(err)
 		return err
 	}
+	log.Println("opened file")
 	// move to the beginning of the file
 	temp.Seek(0, io.SeekStart)
 	offset := 0
 	// first we write the constants
 	err = writeConstants(temp, &offset)
 	if err != nil {
+		log.Println(err)
 		return err
 	}
+	log.Println("wrote constants")
 
-	// then we write the StringSETs datasructure
+	// then we write the StringSETs datastructure
 	err = writeStrings(temp, &offset)
 	if err != nil {
 		return err
 	}
+	log.Println("wrote strings successfully")
+
 	// then we write the LISTS datastructure
 	err = writeLists(temp, &offset)
 	if err != nil {
 		return err
 	}
+	log.Println("wrote lists successfully")
+
 	// then we write the SETs datastucture
 	err = writeSets(temp, &offset)
 	if err != nil {
 		return err
 	}
+	log.Println("wrote sets successfully")
+
 	// then we write the HSETs datastructure
 	err = writeHash(temp, &offset)
 	if err != nil {
 		return err
 	}
+	log.Println("wrote hash successfully")
+
 	// then we write the RdbEOF flag
 	err = writeRdb_Eof(temp, &offset)
 	if err != nil {
 		return err
 	}
+	log.Println("wrote rdb eof successfully")
+
 	// we make sure we flush the file to disk
 	err = temp.Sync()
 	if err != nil {
+		log.Println(err)
 		return err
 	}
-	// we atomically rename the database_temp.rdb to database.rbd
-	err = renameRbd()
-	if err != nil {
-		return err
-	}
+	// // we atomically rename the database_temp.rdb to database.rbd
+	// err = renameRbd()
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return err
+	// }
+	// log.Println("finished renaming")
 	return nil
 }
 
@@ -145,21 +169,32 @@ func (rdb *Rdb) load() error {
 	curr.Seek(0, io.SeekStart)
 	offset = 0
 	err = readConstants(curr, &offset)
+	log.Println("Offset: ", offset)
+	if err != nil {
+		log.Println("Failed to read constants lol")
+		return err
+	}
+	log.Println("read all the constants...")
+	// for {
+	byteRead, err := readRdbByte(curr, &offset)
 	if err != nil {
 		return err
 	}
-	for {
-		byteRead, err := readRdbByte(curr)
-		if err != nil {
-			return err
-		}
-		offset++
-		if byteRead == SELECT_DB {
-			break
-		}
+	if byteRead == SELECT_DB {
+		log.Println("read SELECT_DB FLAG")
 	}
+	// }
+	log.Println("Offset: ", offset)
+	databaseNumber, n, _, err := readRdbLength(curr, offset)
+	log.Println(databaseNumber)
+	if err != nil {
+		return err
+	}
+	offset += n
+	log.Println("Offset: ", offset)
 	for {
-		valueEncoding, n, end, err := readRdbLength(curr)
+		valueEncoding, n, end, err := readRdbLength(curr, offset)
+		log.Println(valueEncoding, n, end, err)
 		if err != nil {
 			if err == io.EOF {
 				return nil
@@ -167,27 +202,34 @@ func (rdb *Rdb) load() error {
 			return err
 		}
 		if end {
+			log.Println("read the RDB EOF")
 			return nil
 		}
 		offset += n
+		log.Println("Offset: ", offset)
 		if valueEncoding == SetValueEncoding {
+			log.Println("read value encoding of Set", valueEncoding)
 			err = readRdbSet(curr, &offset)
 			if err != nil {
 				return err
 			}
 		} else if valueEncoding == HashValueEncoding {
+			log.Println("read value encoding of Hash", valueEncoding)
 			err = readRdbHash(curr, &offset)
 			if err != nil {
 				return err
 			}
 		} else if valueEncoding == ListValueEncoding {
+			log.Println("read value encoding of List", valueEncoding)
 			err = readRdbList(curr, &offset)
 			if err != nil {
 				return err
 			}
 		} else if valueEncoding == StringValueEncoding {
+			log.Println("read value encoding of String", valueEncoding)
 			err = readRdbStringSet(curr, &offset)
 			if err != nil {
+				log.Println("finished reading stringSet with", err)
 				return err
 			}
 		}
@@ -197,59 +239,79 @@ func (rdb *Rdb) load() error {
 
 func writeConstants(temp *os.File, offset *int) error {
 	// writes the MAGIC FLAG
+	constantBytes := make([]byte, 0)
 	n, err := temp.WriteAt([]byte(MAGIC), int64(*offset))
 	if err != nil {
 		return err
 	}
+	constantBytes = append(constantBytes, []byte(MAGIC)...)
+	log.Println("Offset: ", *offset)
 	*offset += n
+	log.Println("Offset: ", *offset)
+
 	// writes the VERSION FLAG
 	n, err = temp.WriteAt([]byte(VERSION), int64(*offset))
 	if err != nil {
 		return err
 	}
 	*offset += n
+	log.Println("Offset: ", *offset)
+	constantBytes = append(constantBytes, []byte(VERSION)...)
+
 	// writes the SELECT_DB FLAG
 	n, err = temp.WriteAt([]byte{SELECT_DB}, int64(*offset))
 	if err != nil {
 		return err
 	}
 	*offset += n
+	log.Println("Offset: ", *offset)
+	constantBytes = append(constantBytes, []byte{SELECT_DB}...)
+
 	// Then we write the DATABASE no
 	databaseSelector := serializeLength(DATABASE_NO)
 	n, err = temp.WriteAt(databaseSelector, int64(*offset))
 	if err != nil {
 		return err
 	}
+	constantBytes = append(constantBytes, databaseSelector...)
 	*offset += n
+	log.Println("Offset: ", *offset)
+	log.Println(constantBytes)
 	return nil
 }
 
 // Function which writes the StringSETS DataStructure to the Rdb file
 func writeStrings(temp *os.File, offset *int) error {
-	var n int
 	StringSETSMu.Lock()
 	defer StringSETSMu.Unlock()
-	// We first write the StringValue
-	n, err := temp.WriteAt(serializeLength(StringValueEncoding), int64(*offset))
-	if err != nil {
-		return err
-	}
-	*offset += n
 	// We write each key and value using String Encoding
-	for key, value := range StringSETS {
-		keyBytes := serializeString(key)
-		valueBytes := serializeString(value)
-		stringBytes := make([]byte, 0)
-		// Concatenate the key and value serialization
-		// so in case we fail in the middle we wont have partially written
-		// a key without writing a value
-		stringBytes = append(stringBytes, keyBytes...)
-		stringBytes = append(stringBytes, valueBytes...)
-		n, err := temp.WriteAt(stringBytes, int64(*offset))
-		if err != nil {
-			return err
+	if len(StringSETS) > 0 {
+		for key, value := range StringSETS {
+			// We first write the StringValue
+			valueEncoding := serializeLength(StringValueEncoding)
+			log.Println(valueEncoding, len(valueEncoding))
+			n, err := temp.WriteAt(valueEncoding, int64(*offset))
+			if err != nil {
+				return err
+			}
+			*offset += n
+			keyBytes := serializeString(key)
+			log.Println(keyBytes, len(keyBytes))
+			valueBytes := serializeString(value)
+			log.Println(valueBytes, len(valueBytes))
+			stringBytes := make([]byte, 0)
+			// Concatenate the key and value serialization
+			// so in case we fail in the middle we wont have partially written
+			// a key without writing a value
+			stringBytes = append(stringBytes, keyBytes...)
+			stringBytes = append(stringBytes, valueBytes...)
+			log.Println(stringBytes, len(stringBytes))
+			n, err = temp.WriteAt(stringBytes, int64(*offset))
+			if err != nil {
+				return err
+			}
+			*offset += n
 		}
-		*offset += n
 	}
 	return nil
 }
@@ -414,26 +476,28 @@ Atomically renames the temporary rdb to the current rdb
 os.Rename should be atomic hopefully
 */
 func renameRbd() error {
-	err := os.Rename("database_temp.rbd", "database.rbd")
+	err := os.Rename("database_temp.rdb", "database.rdb")
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func readRdbByte(file *os.File) (byte, error) {
+func readRdbByte(file *os.File, offset *int) (byte, error) {
 	byteRead := make([]byte, 1)
-	_, err := file.Read(byteRead)
+	n, err := file.ReadAt(byteRead, int64(*offset))
+	log.Println(n, byteRead, byteRead[0])
+	*offset += n
 	if err != nil {
 		return byteRead[0], err
 	}
 	return byteRead[0], nil
 }
 
-func readRdbLength(file *os.File) (result int, bytesRead int, eof bool, Err error) {
+func readRdbLength(file *os.File, offset int) (result int, bytesRead int, eof bool, Err error) {
 	// Read one byte from the stream
 	byteRead := make([]byte, 1)
-	_, err := file.Read(byteRead)
+	_, err := file.ReadAt(byteRead, int64(offset))
 	if err != nil {
 		log.Println("Error reading file:", err)
 		return -1, -1, false, err
@@ -452,7 +516,7 @@ func readRdbLength(file *os.File) (result int, bytesRead int, eof bool, Err erro
 
 	case 0b01: // 01: Read one additional byte. The combined 14 bits represent the length
 		nextByte := make([]byte, 1)
-		_, err := file.Read(nextByte)
+		_, err := file.ReadAt(nextByte, int64(offset)+1)
 		if err != nil {
 			log.Println("Error reading additional byte:", err)
 			return -1, -1, false, nil
@@ -463,7 +527,7 @@ func readRdbLength(file *os.File) (result int, bytesRead int, eof bool, Err erro
 
 	case 0b10: // 10: Discard the remaining 6 bits. The next 4 bytes represent the length
 		lengthBytes := make([]byte, 4)
-		_, err := file.Read(lengthBytes)
+		_, err := file.ReadAt(lengthBytes, int64(offset)+1)
 		if err != nil {
 			log.Println("Error reading 4 bytes for length:", err)
 			return -1, -1, false, nil
@@ -487,7 +551,8 @@ func readRdbSet(file *os.File, offset *int) error {
 	defer SETsMu.Unlock()
 
 	// Read key size
-	keySize, n, _, err := readRdbLength(file)
+	keySize, n, _, err := readRdbLength(file, *offset)
+	log.Println(keySize, n, err)
 	if err != nil {
 		return err
 	}
@@ -495,6 +560,7 @@ func readRdbSet(file *os.File, offset *int) error {
 
 	// Read key
 	key := make([]byte, keySize)
+	log.Println(string(key))
 	n, err = file.ReadAt(key, int64(*offset))
 	if err != nil {
 		return err
@@ -502,7 +568,7 @@ func readRdbSet(file *os.File, offset *int) error {
 	*offset += n
 
 	// Read set size
-	setSize, n, _, err := readRdbLength(file)
+	setSize, n, _, err := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -515,7 +581,7 @@ func readRdbSet(file *os.File, offset *int) error {
 
 	// Read each value in the set
 	for i := 0; i < setSize; i++ {
-		valueSize, n, _, err := readRdbLength(file)
+		valueSize, n, _, err := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -537,7 +603,7 @@ func readRdbSet(file *os.File, offset *int) error {
 func readRdbHash(file *os.File, offset *int) error {
 	HSETsMu.Lock()
 	defer HSETsMu.Unlock()
-	hashNameSize, n, _, err := readRdbLength(file)
+	hashNameSize, n, _, err := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -547,14 +613,19 @@ func readRdbHash(file *os.File, offset *int) error {
 	if err != nil {
 		return err
 	}
+	// Initialize the set if it doesn't exist
+	if HSETs[string(hashName)] == nil {
+		HSETs[string(hashName)] = make(map[string]string)
+	}
+
 	*offset += n
-	hashSize, n, _, err := readRdbLength(file)
+	hashSize, n, _, err := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
 	*offset += n
 	for i := 0; i < hashSize; i++ {
-		keySize, n, _, err := readRdbLength(file)
+		keySize, n, _, err := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -565,7 +636,7 @@ func readRdbHash(file *os.File, offset *int) error {
 			return err
 		}
 		*offset += n
-		valueSize, n, _, err := readRdbLength(file)
+		valueSize, n, _, err := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -582,9 +653,9 @@ func readRdbHash(file *os.File, offset *int) error {
 }
 
 func readRdbList(file *os.File, offset *int) error {
-	LISTSMu.Lock()
-	defer LISTSMu.Unlock()
-	keySize, n, _, err := readRdbLength(file)
+	// LISTSMu.Lock()
+	// defer LISTSMu.Unlock()
+	keySize, n, _, err := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
@@ -595,14 +666,14 @@ func readRdbList(file *os.File, offset *int) error {
 		return err
 	}
 	*offset += n
-	setSize, n, _, err := readRdbLength(file)
+	setSize, n, _, err := readRdbLength(file, *offset)
 	if err != nil {
 		return err
 	}
 	*offset += n
 	values := make([]string, 0)
 	for i := 0; i < setSize; i++ {
-		valueSize, n, _, err := readRdbLength(file)
+		valueSize, n, _, err := readRdbLength(file, *offset)
 		if err != nil {
 			return err
 		}
@@ -624,42 +695,50 @@ func readConstants(file *os.File, offset *int) error {
 	if err != nil {
 		return err
 	}
+	log.Print(magicBytes)
 	*offset += n
 	versionBytes := make([]byte, len(VERSION))
 	n, err = file.ReadAt(versionBytes, int64(*offset))
 	if err != nil {
 		return err
 	}
+	log.Print(versionBytes)
 	*offset += n
 	return nil
 }
 func readRdbStringSet(file *os.File, offset *int) error {
-	StringSETSMu.Lock()
-	defer StringSETSMu.Unlock()
-	values := make([]string, 0)
-	keySize, n, _, err := readRdbLength(file)
+	log.Println("Offset: ", offset)
+	keySize, n, _, err := readRdbLength(file, *offset)
+	log.Println(keySize, n, err)
 	if err != nil {
 		return err
 	}
 	*offset += n
+	log.Println("Offset: ", offset)
 	key := make([]byte, keySize)
 	n, err = file.ReadAt(key, int64(*offset))
 	if err != nil {
-		return err
+		log.Println("error while reading key", err)
+		// return err
 	}
+	log.Println(n, err, len(key), string(key))
 	*offset += n
-	valueSize, n, _, err := readRdbLength(file)
+	valueSize, n, _, err := readRdbLength(file, *offset)
 	if err != nil {
+		log.Println(err)
 		return err
 	}
+	log.Println(valueSize, n, err)
+	log.Println("finished reading value length", valueSize)
 	*offset += n
 	value := make([]byte, valueSize)
 	n, err = file.ReadAt(value, int64(*offset))
 	if err != nil {
+		log.Println(err)
 		return err
 	}
+	log.Println("finished reading value", value, string(value))
 	*offset += n
-	values = append(values, string(value))
-	ds_sadd(string(key), values)
+	ds_set(string(key), string(value))
 	return nil
 }
